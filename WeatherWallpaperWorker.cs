@@ -45,11 +45,29 @@ public sealed class WeatherWallpaperWorker : BackgroundService
 
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_settings.PollMinutes));
 
-        await RunOneCycleAsync(stoppingToken);
-
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
-            await RunOneCycleAsync(stoppingToken);
+            try
+            {
+                await RunOneCycleAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unhandled exception escaped RunOneCycleAsync.");
+            }
+
+            try
+            {
+                await timer.WaitForNextTickAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 
@@ -153,50 +171,57 @@ public sealed class WeatherWallpaperWorker : BackgroundService
 
     private async Task<OpenWeatherResponse> FetchWeatherAsync(CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient("OpenWeather");
+        try
+        {
+            var client = _httpClientFactory.CreateClient("OpenWeather");
 
-        string lat = _settings.Latitude.ToString(CultureInfo.InvariantCulture);
-        string lon = _settings.Longitude.ToString(CultureInfo.InvariantCulture);
+            string lat = _settings.Latitude.ToString(CultureInfo.InvariantCulture);
+            string lon = _settings.Longitude.ToString(CultureInfo.InvariantCulture);
 
-        string url =
-            $"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={_settings.ApiKey}&units=metric";
+            string url =
+                $"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={_settings.ApiKey}&units=metric";
 
-        _logger.LogInformation(
-            "Fetching OpenWeather data. Latitude={Latitude}, Longitude={Longitude}",
-            lat, lon);
+            _logger.LogInformation(
+                "Fetching OpenWeather data. Latitude={Latitude}, Longitude={Longitude}",
+                lat, lon);
 
-        using var response = await client.GetAsync(url, cancellationToken);
+            using var response = await client.GetAsync(url, cancellationToken);
 
-        _logger.LogInformation(
-            "OpenWeather responded. StatusCode={StatusCode}",
-            (int)response.StatusCode);
+            _logger.LogInformation(
+                "OpenWeather responded. StatusCode={StatusCode}",
+                (int)response.StatusCode);
 
-        response.EnsureSuccessStatusCode();
+            response.EnsureSuccessStatusCode();
 
-        string rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
+            string rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
-        _logger.LogInformation(
-            "Received OpenWeather payload: {Payload}",
-            rawJson);
+            _logger.LogInformation(
+                "Received OpenWeather payload: {Payload}",
+                rawJson);
 
-        var result = JsonSerializer.Deserialize<OpenWeatherResponse>(rawJson);
+            var result = JsonSerializer.Deserialize<OpenWeatherResponse>(rawJson);
 
-        if (result?.Weather == null || result.Weather.Length == 0)
-            throw new InvalidOperationException("OpenWeather returned no weather data.");
+            if (result?.Weather == null || result.Weather.Length == 0)
+                throw new InvalidOperationException("OpenWeather returned no weather data.");
 
-        var firstWeather = result.Weather[0];
+            var firstWeather = result.Weather[0];
 
-        _logger.LogInformation(
-            "Parsed OpenWeather data. WeatherId={WeatherId}, Main={Main}, Description={Description}, TempC={TempC}, SunriseUnix={SunriseUnix}, SunsetUnix={SunsetUnix}, TimezoneOffsetSeconds={TimezoneOffsetSeconds}",
-            firstWeather.Id,
-            firstWeather.Main,
-            firstWeather.Description,
-            result.Main.TempC,
-            result.Sys.SunriseUnix,
-            result.Sys.SunsetUnix,
-            result.TimezoneOffsetSeconds);
+            _logger.LogInformation(
+                "Parsed OpenWeather data. WeatherId={WeatherId}, Main={Main}, Description={Description}, TempC={TempC}, SunriseUnix={SunriseUnix}, SunsetUnix={SunsetUnix}, TimezoneOffsetSeconds={TimezoneOffsetSeconds}",
+                firstWeather.Id,
+                firstWeather.Main,
+                firstWeather.Description,
+                result.Main.TempC,
+                result.Sys.SunriseUnix,
+                result.Sys.SunsetUnix,
+                result.TimezoneOffsetSeconds);
 
-        return result;
+            return result;
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("OpenWeather request timed out.", ex);
+        }
     }
 
     private bool IsWallpaperEngineRunning()

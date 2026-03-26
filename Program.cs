@@ -25,7 +25,12 @@ try
 
     builder.Services.AddHttpClient("OpenWeather", client =>
     {
-        client.Timeout = TimeSpan.FromSeconds(10);
+        client.Timeout = TimeSpan.FromSeconds(20);
+    });
+
+    builder.Services.Configure<HostOptions>(options =>
+    {
+        options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
     });
 
     builder.Services.AddHostedService<WeatherWallpaperWorker>();
