@@ -364,8 +364,12 @@ public sealed class WeatherWallpaperWorker : BackgroundService
         if (openWeatherId >= 300 && openWeatherId < 400)
             return "8";
 
-        // 5xx rain -> rain (or green rain replacement)
-        if (openWeatherId >= 500 && openWeatherId < 600)
+        // 500 -> light rain
+        if (openWeatherId == 500)
+            return "8";
+
+        // 5xx (except 500) -> rain (or green rain replacement)
+        if (openWeatherId > 500 && openWeatherId < 600)
             return greenRainEnabledToday ? "7" : "5";
 
         // 6xx snow -> snowy
